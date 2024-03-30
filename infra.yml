@@ -1,0 +1,267 @@
+Parameters:
+  S3BucketWebsiteHostingName:
+    Type: String
+    Description: Name of S3 bucket that will serve as website hosting
+  S3BucketImagesName:
+    Type: String
+    Description: Name of S3 bucket that will store the app images
+  ApiGatewayStageName:
+    Type: String
+    Default: v1
+
+Resources:
+  S3BucketWebsiteHosting:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName:
+        Ref: S3BucketWebsiteHostingName
+      WebsiteConfiguration:
+        IndexDocument: index.html
+      PublicAccessBlockConfiguration:
+        RestrictPublicBuckets: false
+
+  S3BucketWebsiteHostingPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref S3BucketWebsiteHosting
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: '*'
+            Action: ['s3:GetObject']
+            Resource: !Sub 'arn:aws:s3:::${S3BucketWebsiteHosting}/*'
+
+  S3BucketImagesStore:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName:
+        Ref: S3BucketImagesName
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - '*'
+            AllowedMethods:
+              - GET
+              - PUT
+            AllowedOrigins:
+              - !Sub 'http://${S3BucketWebsiteHosting}.s3-website-us-east-1.amazonaws.com'
+              - 'http://localhost:3000'
+            MaxAge: 3600
+
+  ImageMetadataTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: image_metadata
+      AttributeDefinitions:
+        - AttributeName: 'image_group'
+          AttributeType: 'N'
+        - AttributeName: 'created_at'
+          AttributeType: 'N'
+      KeySchema:
+        - AttributeName: 'image_group'
+          KeyType: 'HASH'
+        - AttributeName: 'created_at'
+          KeyType: 'RANGE'
+      ProvisionedThroughput:
+        ReadCapacityUnits: 2
+        WriteCapacityUnits: 1
+
+  DBMetadataTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: db_metadata
+      AttributeDefinitions:
+        - AttributeName: 'table_name'
+          AttributeType: 'S'
+      KeySchema:
+        - AttributeName: 'table_name'
+          KeyType: 'HASH'
+      ProvisionedThroughput:
+        ReadCapacityUnits: 2
+        WriteCapacityUnits: 1
+
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code: ./backend/function.zip
+      FunctionName: image-uploader-app-function
+      Handler: dist/index.handler
+      PackageType: Zip
+      Role: !GetAtt FunctionRole.Arn
+      Runtime: nodejs20.x
+      Environment:
+        Variables:
+          S3_BUCKET_IMAGES_STORE: !Ref S3BucketImagesStore
+          IMAGE_METADATA_TABLE: !Ref ImageMetadataTable
+          DB_METADATA_TABLE: !Ref DBMetadataTable
+          WEBSITE_ORIGIN: !Sub 'http://${S3BucketWebsiteHosting}.s3-website-us-east-1.amazonaws.com'
+
+  FunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource:
+                  - !GetAtt ImageMetadataTable.Arn
+                  - !GetAtt DBMetadataTable.Arn
+                  - !Sub 'arn:aws:s3:::${S3BucketImagesStore}/*'
+
+  RestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: image-uploader-app-api
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  RestApiMethodGet:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      ResourceId: !GetAtt RestApi.RootResourceId
+      RestApiId: !Ref RestApi
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub
+          - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FunctionArn}/invocations
+          - FunctionArn: !GetAtt Function.Arn
+
+  RestApiMethodPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: POST
+      ResourceId: !GetAtt RestApi.RootResourceId
+      RestApiId: !Ref RestApi
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub
+          - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FunctionArn}/invocations
+          - FunctionArn: !GetAtt Function.Arn
+
+  RestApiMethodPatch:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: PATCH
+      ResourceId: !GetAtt RestApi.RootResourceId
+      RestApiId: !Ref RestApi
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub
+          - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FunctionArn}/invocations
+          - FunctionArn: !GetAtt Function.Arn
+
+  RestApiMethodDelete:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: DELETE
+      ResourceId: !GetAtt RestApi.RootResourceId
+      RestApiId: !Ref RestApi
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub
+          - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FunctionArn}/invocations
+          - FunctionArn: !GetAtt Function.Arn
+
+  RestApiMethodOptions:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !GetAtt RestApi.RootResourceId
+      RestApiId: !Ref RestApi
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub
+          - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FunctionArn}/invocations
+          - FunctionArn: !GetAtt Function.Arn
+
+  RestApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - RestApiMethodGet
+      - RestApiMethodPost
+      - RestApiMethodPatch
+      - RestApiMethodDelete
+      - RestApiMethodOptions
+    Properties:
+      RestApiId: !Ref RestApi
+      StageName: !Ref ApiGatewayStageName
+
+  FunctionRestApiInvokeGet:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt Function.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/${ApiGatewayStageName}/GET/
+
+  FunctionRestApiInvokePost:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt Function.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/${ApiGatewayStageName}/POST/
+
+  FunctionRestApiInvokePatch:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt Function.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/${ApiGatewayStageName}/PATCH/
+
+  FunctionRestApiInvokeDelete:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt Function.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/${ApiGatewayStageName}/DELETE/
+
+  FunctionRestApiInvokeOptions:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt Function.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/${ApiGatewayStageName}/OPTIONS/
+
+Outputs:
+  WebsiteURL:
+    Value: !GetAtt S3BucketWebsiteHosting.WebsiteURL
+    Description: URL for website hosted on S3
+
+  RestApiEndpoint:
+    Value: !Sub https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${ApiGatewayStageName}

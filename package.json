@@ -3,10 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "prepare": "chmod +x scripts.sh",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "create-infra-locally": "./scripts.sh create-infra-locally",
+    "create-infra": "./scripts.sh create-infra",
+    "delete-infra": "./scripts.sh delete-infra",
+    "deploy-next-app": "./scripts.sh deploy-next-app"
   },
   "dependencies": {
     "react": "^18",
@@ -18,9 +23,6 @@
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
-    "autoprefixer": "^10.0.1",
-    "postcss": "^8",
-    "tailwindcss": "^3.3.0",
     "eslint": "^8",
     "eslint-config-next": "14.1.4"
   }
