@@ -1,4 +1,3 @@
-import { allowOrigin } from '../utils/allowOrigin'
 import { IResponse } from './IResponse'
 
 export class Response implements IResponse {
@@ -25,7 +24,7 @@ export class Response implements IResponse {
       headers: {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': this.allowedOrigin,
-        'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+        'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
         'Access-Control-Allow-Headers':
           'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'
       },

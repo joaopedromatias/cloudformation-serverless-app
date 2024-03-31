@@ -1,5 +1,5 @@
 import { APIGatewayProxyEvent } from 'aws-lambda'
 
 export interface IHandler {
-  handler: (event: APIGatewayProxyEvent) => Promise<Record<string, unknown> | undefined>
+  handle: (event: APIGatewayProxyEvent) => Promise<Record<string, unknown> | undefined>
 }
