@@ -91,6 +91,7 @@ Resources:
       PackageType: Zip
       Role: !GetAtt FunctionRole.Arn
       Runtime: nodejs20.x
+      Timeout: 30
       Environment:
         Variables:
           S3_BUCKET_IMAGES_STORE: !Ref S3BucketImagesStore
@@ -121,6 +122,7 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:Query
                   - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
                   - s3:GetObject
                   - s3:PutObject
                 Resource:
@@ -150,12 +152,19 @@ Resources:
           - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FunctionArn}/invocations
           - FunctionArn: !GetAtt Function.Arn
 
-  RestApiMethodPost:
+  PresignedUrlResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: presigned-url
+
+  RestApiMethodGetPresignedUrl:
     Type: AWS::ApiGateway::Method
     Properties:
       AuthorizationType: NONE
-      HttpMethod: POST
-      ResourceId: !GetAtt RestApi.RootResourceId
+      HttpMethod: GET
+      ResourceId: !Ref PresignedUrlResource
       RestApiId: !Ref RestApi
       Integration:
         IntegrationHttpMethod: POST
@@ -164,11 +173,11 @@ Resources:
           - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FunctionArn}/invocations
           - FunctionArn: !GetAtt Function.Arn
 
-  RestApiMethodPatch:
+  RestApiMethodPost:
     Type: AWS::ApiGateway::Method
     Properties:
       AuthorizationType: NONE
-      HttpMethod: PATCH
+      HttpMethod: POST
       ResourceId: !GetAtt RestApi.RootResourceId
       RestApiId: !Ref RestApi
       Integration:
@@ -206,14 +215,29 @@ Resources:
           - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FunctionArn}/invocations
           - FunctionArn: !GetAtt Function.Arn
 
+  RestApiMethodOptionsPresignedUrl:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref PresignedUrlResource
+      RestApiId: !Ref RestApi
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub
+          - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FunctionArn}/invocations
+          - FunctionArn: !GetAtt Function.Arn
+
   RestApiDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
       - RestApiMethodGet
+      - RestApiMethodGetPresignedUrl
       - RestApiMethodPost
-      - RestApiMethodPatch
       - RestApiMethodDelete
       - RestApiMethodOptions
+      - RestApiMethodOptionsPresignedUrl
     Properties:
       RestApiId: !Ref RestApi
       StageName: !Ref ApiGatewayStageName
@@ -226,6 +250,14 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/${ApiGatewayStageName}/GET/
 
+  FunctionRestApiInvokeGetPresignedUrl:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt Function.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/${ApiGatewayStageName}/GET/presigned-url
+
   FunctionRestApiInvokePost:
     Type: AWS::Lambda::Permission
     Properties:
@@ -233,14 +265,6 @@ Resources:
       FunctionName: !GetAtt Function.Arn
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/${ApiGatewayStageName}/POST/
-
-  FunctionRestApiInvokePatch:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: lambda:InvokeFunction
-      FunctionName: !GetAtt Function.Arn
-      Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/${ApiGatewayStageName}/PATCH/
 
   FunctionRestApiInvokeDelete:
     Type: AWS::Lambda::Permission
