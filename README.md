@@ -5,3 +5,4 @@ Commands:
 - `npm run create-infra`
 - `npm run deploy-next-app`
 - `npm run delete-infra`
+- `cd ./backend && npm run test`
